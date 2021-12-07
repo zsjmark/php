@@ -6,6 +6,11 @@
 
 FROM debian:bullseye-slim
 
+#配置代理
+ENV http_proxy "http://192.168.1.4:8118"
+ENV https_proxy "http://192.168.1.4:8118"
+ENV ftp_proxy "http://192.168.1.4:8118"
+
 # prevent Debian's PHP packages from being installed
 # https://github.com/docker-library/php/pull/542
 RUN set -eux; \
@@ -13,7 +18,7 @@ RUN set -eux; \
 		echo 'Package: php*'; \
 		echo 'Pin: release *'; \
 		echo 'Pin-Priority: -1'; \
-	} > /etc/apt/preferences.d/no-debian-php
+	} > /etc/apt/preferences.d/no-debian-php 
 
 # dependencies required for running "phpize"
 # (see persistent deps below)
@@ -30,12 +35,17 @@ ENV PHPIZE_DEPS \
 
 # persistent / runtime deps
 RUN set -eux; \
+    # 国内源
+    sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
+	sed -i 's/security.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
 		$PHPIZE_DEPS \
 		ca-certificates \
 		curl \
 		xz-utils \
+		vim \
+		wget\
 	; \
 	rm -rf /var/lib/apt/lists/*
 
@@ -67,8 +77,11 @@ ENV PHP_SHA256="cd976805ec2e9198417651027dfe16854ba2c2c388151ab9d4d268513d52ed52
 RUN set -eux; \
 	\
 	savedAptMark="$(apt-mark showmanual)"; \
-	apt-get update; \
-	apt-get install -y --no-install-recommends gnupg dirmngr; \
+	apt-get update; \	
+	apt-get install -y --no-install-recommends \	        
+	        gnupg \
+			dirmngr; \
+	\		
 	rm -rf /var/lib/apt/lists/*; \
 	\
 	mkdir -p /usr/src; \
@@ -111,7 +124,22 @@ RUN set -eux; \
 		libssl-dev \
 		libxml2-dev \
 		zlib1g-dev \
+		libfreetype6-dev \
+		libjpeg62-turbo-dev \
+		libpng-dev \
 	; \
+    wget http://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.16.tar.gz; \
+    tar xvzf libiconv-1.16.tar.gz; \
+    cd libiconv-1.16 &&  \
+    ./configure --prefix=/usr/local/libiconv-1.16 && \
+    make && make install &&\
+    ln -s  /usr/local/libiconv-1.16 /usr/local/libiconv && \
+    make clean \
+	; \
+	cd .. && \
+	rm libiconv-1.16.tar.gz && \
+	rm libiconv-1.16 -rf \
+    ; \
 	\
 	export \
 		CFLAGS="$PHP_CFLAGS" \
@@ -146,6 +174,12 @@ RUN set -eux; \
 		--enable-mbstring \
 # --enable-mysqlnd is included here because it's harder to compile after the fact than extensions are (since it's a plugin for several extensions, not an extension in itself)
 		--enable-mysqlnd \
+		--enable-sockets \
+		--enable-gd \
+		--with-freetype=/usr/include/ \
+		--with-jpeg=/usr/include/ \
+		--enable-intl \
+		--enable-opcache \
 # https://wiki.php.net/rfc/argon2_password_hash
 		--with-password-argon2 \
 # https://wiki.php.net/rfc/libsodium
@@ -153,11 +187,17 @@ RUN set -eux; \
 # always build against system sqlite3 (https://github.com/php/php-src/commit/6083a387a81dbbd66d6316a3a12a63f06d5f7109)
 		--with-pdo-sqlite=/usr \
 		--with-sqlite3=/usr \
-		\
 		--with-curl \
 		--with-openssl \
 		--with-readline \
 		--with-zlib \
+		--with-pdo-mysql  \
+		--with-mysql-sock=/tmp/mysql.sock \
+		--with-openssl \
+		--with-readline \
+		--with-zlib \
+		--with-freetype \
+		#--with-iconv=/usr/local/libiconv \
 		\
 # in PHP 7.4+, the pecl/pear installers are officially deprecated (requiring an explicit "--with-pear")
 		--with-pear \
@@ -211,7 +251,7 @@ RUN set -eux; \
 	rm -rf /tmp/pear ~/.pearrc; \
 	\
 # smoke test
-	php --version
+	php --version && php -i
 
 COPY docker-php-ext-* docker-php-entrypoint /usr/local/bin/
 
