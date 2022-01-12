@@ -30,12 +30,19 @@ ENV PHPIZE_DEPS \
 
 # persistent / runtime deps
 RUN set -eux; \
+    #
+	# 国内源
+    sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
+	sed -i 's/security.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list; \
+	#
+	#
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
 		$PHPIZE_DEPS \
 		ca-certificates \
 		curl \
 		xz-utils \
+		wget \
 	; \
 	rm -rf /var/lib/apt/lists/*
 
@@ -60,9 +67,13 @@ ENV PHP_LDFLAGS="-Wl,-O1 -pie"
 
 ENV GPG_KEYS 528995BFEDFBA7191D46839EF9BA0ADA31CBD89E 39B641343D8C104B2B146DC3F9C39DC0B9698544 F1F692238FBC1666E5A5CCD4199F9DFEF6FFBAFD
 
-ENV PHP_VERSION 8.1.0
-ENV PHP_URL="https://www.php.net/distributions/php-8.1.0.tar.xz" PHP_ASC_URL="https://www.php.net/distributions/php-8.1.0.tar.xz.asc"
-ENV PHP_SHA256="a1317eff0723a2b3d3122bbfe107a1158570ea2822dc35a5fb360086db0f6bbc"
+ENV PHP_VERSION 8.1.1
+ENV PHP_URL="https://www.php.net/distributions/php-8.1.1.tar.xz" PHP_ASC_URL="https://www.php.net/distributions/php-8.1.1.tar.xz.asc"
+ENV PHP_SHA256="33c09d76d0a8bbb5dd930d9dd32e6bfd44e9efcf867563759eb5492c3aff8856"
+COPY src/php-8.1.1.tar.xz.asc /usr/src/php.tar.xz.asc
+COPY src/php-8.1.1.tar.xz /usr/src/php.tar.xz
+
+ENV COMPOSER_VERSION 2.2.4
 
 RUN set -eux; \
 	\
@@ -71,17 +82,17 @@ RUN set -eux; \
 	apt-get install -y --no-install-recommends gnupg dirmngr; \
 	rm -rf /var/lib/apt/lists/*; \
 	\
-	mkdir -p /usr/src; \
+	#mkdir -p /usr/src; \
 	cd /usr/src; \
 	\
-	curl -fsSL -o php.tar.xz "$PHP_URL"; \
+	#curl -fsSL -o php.tar.xz "$PHP_URL"; \
 	\
 	if [ -n "$PHP_SHA256" ]; then \
 		echo "$PHP_SHA256 *php.tar.xz" | sha256sum -c -; \
 	fi; \
 	\
 	if [ -n "$PHP_ASC_URL" ]; then \
-		curl -fsSL -o php.tar.xz.asc "$PHP_ASC_URL"; \
+		#curl -fsSL -o php.tar.xz.asc "$PHP_ASC_URL"; \
 		export GNUPGHOME="$(mktemp -d)"; \
 		for key in $GPG_KEYS; do \
 			gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "$key"; \
@@ -111,7 +122,22 @@ RUN set -eux; \
 		libssl-dev \
 		libxml2-dev \
 		zlib1g-dev \
+		libfreetype6-dev \
+		libjpeg62-turbo-dev \
+		libpng-dev \
 	; \
+	wget http://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.16.tar.gz; \
+    tar xvzf libiconv-1.16.tar.gz; \
+    cd libiconv-1.16 &&  \
+    ./configure --prefix=/usr/local/libiconv-1.16 && \
+    make && make install &&\
+    ln -s  /usr/local/libiconv-1.16 /usr/local/libiconv && \
+    make clean \
+	; \
+	cd .. && \
+	rm libiconv-1.16.tar.gz && \
+	rm libiconv-1.16 -rf \
+    ; \
 	\
 	export \
 		CFLAGS="$PHP_CFLAGS" \
@@ -146,6 +172,12 @@ RUN set -eux; \
 		--enable-mbstring \
 # --enable-mysqlnd is included here because it's harder to compile after the fact than extensions are (since it's a plugin for several extensions, not an extension in itself)
 		--enable-mysqlnd \
+		--enable-sockets \
+		--enable-gd \
+		--with-freetype=/usr/include/ \
+		--with-jpeg=/usr/include/ \
+		--enable-intl \
+		--enable-opcache \
 # https://wiki.php.net/rfc/argon2_password_hash
 		--with-password-argon2 \
 # https://wiki.php.net/rfc/libsodium
@@ -153,11 +185,15 @@ RUN set -eux; \
 # always build against system sqlite3 (https://github.com/php/php-src/commit/6083a387a81dbbd66d6316a3a12a63f06d5f7109)
 		--with-pdo-sqlite=/usr \
 		--with-sqlite3=/usr \
+		--with-pdo-mysql  \
+		--with-mysql-sock=/tmp/mysql.sock \
+		--with-freetype \
 		\
 		--with-curl \
 		--with-openssl \
 		--with-readline \
 		--with-zlib \
+		--with-zip \
 		\
 # in PHP 7.4+, the pecl/pear installers are officially deprecated (requiring an explicit "--with-pear")
 		--with-pear \
@@ -211,7 +247,14 @@ RUN set -eux; \
 	rm -rf /tmp/pear ~/.pearrc; \
 	\
 # smoke test
-	php --version
+	php --version; \
+    cd tmp; \
+	php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+	; \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === '906a84df04cea2aa72f40b5f787e49f22d4c2f19492ac310e8cba5b96ac8b64115ac402c8cd292b8a03482574915d1a8') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" \
+    ; \
+    php composer-setup.php ; \
+    php -r "unlink('composer-setup.php');"  
 
 COPY docker-php-ext-* docker-php-entrypoint /usr/local/bin/
 
